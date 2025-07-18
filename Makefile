@@ -2,7 +2,7 @@
 CXX := g++-14
 NVCC := nvcc
 CUDA_PATH := /usr/local/cuda-12.9
-CXXFLAGS := -std=gnu++23 -fPIC -I$(CUDA_PATH)/include
+CXXFLAGS := -o3 -std=gnu++23 -fPIC -I$(CUDA_PATH)/include
 NVCCFLAGS := -ccbin /usr/bin/gcc-14 -std=c++17 -Xcompiler -fPIC
 LDFLAGS := -L$(CUDA_PATH)/lib64 -lcudart
 BUILD_DIR := build
