@@ -7,6 +7,26 @@
 template<int SZ>
 struct Activation {
     static constexpr int size = SZ;
+
+    template<int IN_SZ>
+    static void init_weights_glorot(Matrix<float, SZ, IN_SZ>& weights) {
+        float r = sqrtf(6.0/(IN_SZ + SZ)); // used for Glorot initialization
+        for (int i = 0; i < SZ; ++i) {
+            for (int j = 0; j < IN_SZ; ++j) {
+                float temp = weights[i, j] = sample<UNIFORM>(-r, r);
+            }
+        }
+    }
+
+    template<int IN_SZ>
+    static void init_weights_he(Matrix<float, SZ, IN_SZ>& weights) {
+        float r = sqrtf(2.0/IN_SZ); // used for He initialization
+        for (int i = 0; i < SZ; ++i) {
+            for (int j = 0; j < IN_SZ; ++j) {
+                float temp = weights[i, j] = sample<NORMAL>(-r, r);
+            }
+        }
+    }
 };
 
 // Base case: does not exist
@@ -30,6 +50,12 @@ concept Activation_ =
     };
 
 
+// -------------------------------------------------------------------
+// |                                                                 |
+// |                                                                 |
+// -------------------------------------------------------------------
+
+
 template<int SZ>
 struct Sigmoid : Activation<SZ> {
     static ColVector<float, SZ> activate(ColVector<float, SZ> const& x) {
@@ -51,12 +77,7 @@ struct Sigmoid : Activation<SZ> {
 
     template<int IN_SZ>
     static void init_weights(Matrix<float, SZ, IN_SZ>& weights) {
-        float r = sqrtf(6.0/(IN_SZ + SZ)); // used for Glorot initialization
-        for (int i = 0; i < SZ; ++i) {
-            for (int j = 0; j < IN_SZ; ++j) {
-                float temp = weights[i, j] = sample<UNIFORM>(-r, r);
-            }
-        }
+        return Activation<SZ>::template init_weights_glorot<IN_SZ>(weights);
     }
 };
 
@@ -81,12 +102,7 @@ struct Tanh : Activation<SZ> {
 
     template<int IN_SZ>
     static void init_weights(Matrix<float, SZ, IN_SZ>& weights) {
-        float r = sqrtf(6.0/(IN_SZ + SZ)); // used for Glorot initialization
-        for (int i = 0; i < SZ; ++i) {
-            for (int j = 0; j < IN_SZ; ++j) {
-                float temp = weights[i, j] = sample<UNIFORM>(-r, r);
-            }
-        }
+        return Activation<SZ>::template init_weights_glorot<IN_SZ>(weights);
     }
 };
 
@@ -96,7 +112,7 @@ struct ReLU : Activation<SZ> {
     static ColVector<float, SZ> activate(ColVector<float, SZ> const& x) {
         ColVector<float, SZ> ret;
         for (int i = 0; i < SZ; ++i) {
-            ret[i] = tanh(x[i]);
+            ret[i] = x[i] > 0 ? x[i] : 0.0f;
         }
         return ret;
     }
@@ -104,20 +120,48 @@ struct ReLU : Activation<SZ> {
     static ColVector<float, SZ> derivative(ColVector<float, SZ> const& x) {
         ColVector<float, SZ> ret;
         for (int i = 0; i < SZ; ++i) {
-            float temp = tanh(x[i]);
-            ret[i] = 1 - temp * temp;
+            ret[i] = x[i] > 0 ? 1.0f : 0.0f;
         }
         return ret;
     }
 
     template<int IN_SZ>
     static void init_weights(Matrix<float, SZ, IN_SZ>& weights) {
-        float r = sqrtf(2.0/IN_SZ); // used for He initialization
-        for (int i = 0; i < SZ; ++i) {
-            for (int j = 0; j < IN_SZ; ++j) {
-                float temp = weights[i, j] = sample<NORMAL>(-r, r);
-            }
-        }
+        return Activation<SZ>::template init_weights_he<IN_SZ>(weights);
     }
 };
 
+
+template<int SZ>
+struct Softmax : Activation<SZ> {
+    static ColVector<float, SZ> activate(ColVector<float, SZ> const& x) {
+        float max_val = x[0];
+        for (int i = 1; i < SZ; ++i) {
+            if (x[i] > max_val) max_val = x[i];
+        }
+        float sum = 0.0f;
+        ColVector<float, SZ> ret;
+        for (int i = 0; i < SZ; ++i) {
+            ret[i] = std::exp(x[i] - max_val);
+            sum += ret[i];
+        }
+        for (int i = 0; i < SZ; ++i) {
+            ret[i] /= sum;
+        }
+        return ret;
+    }
+
+    static ColVector<float, SZ> derivative(ColVector<float, SZ> const& x) {
+        ColVector<float, SZ> ret;
+        ColVector<float, SZ> y = activate(x);
+        for (int i = 0; i < SZ; ++i) {
+            ret[i] = y[i] * (1 - y[i]);
+        }
+        return ret;
+    }
+
+    template<int IN_SZ>
+    static void init_weights(Matrix<float, SZ, IN_SZ>& weights) {
+        return Activation<SZ>::template init_weights_glorot<IN_SZ>(weights);
+    }
+};
