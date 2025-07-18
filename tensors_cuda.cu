@@ -22,6 +22,18 @@ __global__ void matmul_kernel(const float* A, int Avs, int Ahs, int Avm, int Ahm
     }
 }
 
+
+float* alloc_cuda(const float* A, size_t sizeA_bytes, int Avs, int Ahs, int Avm, int Ahm) {
+    float *d_A;
+    cudaMalloc(&d_A, sizeA_bytes);
+    cudaMemcpy(d_A, A, sizeA_bytes, cudaMemcpyKind::cudaMemcpyHostToDevice);
+    return d_A;
+}
+
+void free_cuda(float* d_C) {
+    cudaFree(d_C);
+}
+
 void matmul_cuda(const float* A, size_t sizeA_bytes, int Avs, int Ahs, int Avm, int Ahm,
                  const float* B, size_t sizeB_bytes, int Bvs, int Bhs, int Bvm, int Bhm,
                  float* C, int V, int N, int H) {
@@ -50,3 +62,30 @@ void matmul_cuda(const float* A, size_t sizeA_bytes, int Avs, int Ahs, int Avm, 
     cudaFree(d_B);
     cudaFree(d_C);
 }
+
+
+// requires allocating and cudaMemcpy of d_A of some matrix A first
+float* matmul_cuda_flow(const float* d_A, size_t sizeA_bytes, int Avs, int Ahs, int Avm, int Ahm,
+                 const float* B, size_t sizeB_bytes, int Bvs, int Bhs, int Bvm, int Bhm,
+                 float* C, int V, int N, int H) {
+    float *d_B, *d_C;
+    size_t sizeC_bytes = V * N * sizeof(float);
+
+    cudaMalloc(&d_B, sizeB_bytes);
+    cudaMalloc(&d_C, sizeC_bytes);
+    cudaMemcpy(d_B, B, sizeB_bytes, cudaMemcpyKind::cudaMemcpyHostToDevice);
+
+    dim3 threads(32, 32);
+    dim3 blocks((N + 31) / 32, (V + 31) / 32);
+
+    matmul_kernel<<<blocks, threads>>>(
+        d_A, Avs, Ahs, Avm, Ahm,
+        d_B, Bvs, Bhs, Bvm, Bhm,
+        d_C, V, N, H
+    );
+
+    cudaMemcpy(C, d_C, sizeC_bytes, cudaMemcpyKind::cudaMemcpyDeviceToHost);
+    cudaFree(d_B);
+    return d_C;
+}
+
