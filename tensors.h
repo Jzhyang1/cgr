@@ -16,20 +16,18 @@ template<typename T, int L>
 struct ColVector;
 
 
-template<typename T, int LEN>
-struct Tensor {
+template<typename T>
+struct DataSlice {
+    // A lightweight wrapper for full-on vector data
+
     std::shared_ptr<std::vector<T>> raw_data;   // only kept if data is owned by a tensor
     std::span<T> data_view;
 
 
-    Tensor(): raw_data(std::make_shared<std::vector<T>>(LEN)), data_view(std::span(*raw_data)) {}
-    Tensor(std::shared_ptr<std::vector<T>> idata): raw_data(idata), data_view(std::span(*raw_data)) {
-        assert(raw_data->size() == LEN);
-    }
-    Tensor(std::initializer_list<T> idata): raw_data(std::make_shared<std::vector<T>>(idata)), data_view(std::span(*raw_data)) {
-        assert(raw_data->size() == LEN);
-    }
-    Tensor(std::span<T> iview): data_view(iview) {}
+    DataSlice(int size): raw_data(std::make_shared<std::vector<T>>(size)), data_view(std::span(*raw_data)) {}
+    DataSlice(std::shared_ptr<std::vector<T>> idata): raw_data(idata), data_view(std::span(*raw_data)) {}
+    DataSlice(std::initializer_list<T> idata): raw_data(std::make_shared<std::vector<T>>(idata)), data_view(std::span(*raw_data)) {}
+    DataSlice(std::span<T> iview): data_view(iview) {}
 
     
     T& operator[](int i) {
@@ -42,37 +40,32 @@ struct Tensor {
 
 template<typename T, int V = 1, int H = 1>
 struct Matrix {
-    
+    DataSlice<T> data;
     int v_multiplier = H, h_multiplier = 1;
     int v_start = 0, h_start = 0; // for submatrix view
     
-    Matrix(RowVector<T, H> mat): Matrix(&mat, mat.v_multiplier, mat.h_multiplier, mat.v_start, mat.h_start) {}
-    Matrix(ColVector<T, V> mat): Matrix(&mat, mat.v_multiplier, mat.h_multiplier, mat.v_start, mat.h_start) {}
+    Matrix(): data(V * H) {};
+    Matrix(RowVector<T, H> mat): Matrix(mat.data, mat.v_multiplier, mat.h_multiplier, mat.v_start, mat.h_start) {}
+    Matrix(ColVector<T, V> mat): Matrix(mat.data, mat.v_multiplier, mat.h_multiplier, mat.v_start, mat.h_start) {}
 
-    //these are a bit iffy but it's needed to make views in higher level data structures
-    template<L>
-    Matrix(Tensor<T, V*H>* data, int v_multiplier, int h_multiplier): Tensor<T, H*V>(data), v_multiplier(v_multiplier), h_multiplier(h_multiplier) {}
-    Matrix(Tensor<T, V*H>* data, int v_multiplier, int h_multiplier, int v_start, int h_start): 
-        Tensor<T, H*V>(data), v_multiplier(v_multiplier), h_multiplier(h_multiplier), v_start(v_start), h_start(h_start) {}
-    using Tensor<T, H*V>::Tensor;
+    Matrix(DataSlice<T> data): data(data) {}
+    Matrix(DataSlice<T> data, int v_multiplier, int h_multiplier): data(data), v_multiplier(v_multiplier), h_multiplier(h_multiplier) {}
+    Matrix(DataSlice<T> data, int v_multiplier, int h_multiplier, int v_start, int h_start): 
+        data(data), v_multiplier(v_multiplier), h_multiplier(h_multiplier), v_start(v_start), h_start(h_start) {}
 
-    // RowVector<T, H> operator[](int v) {
-    //     // gets the v'th row as a row std::vector
-    //     return RowVector<T, H>(this, v_multiplier, h_multiplier, v_start + v, h_start);
-    // }
 
     T& operator[](int const v, int const h) {
         // gets the v'th row as a row std::vector
-        return Tensor<T, H*V>::operator[]((v_start + v) * v_multiplier + (h_start + h) * h_multiplier);
+        return data[(v_start + v) * v_multiplier + (h_start + h) * h_multiplier];
     }
 
     T operator[](int const v, int const h) const {
         // gets the v'th row as a row std::vector
-        return Tensor<T, H*V>::operator[]((v_start + v) * v_multiplier + (h_start + h) * h_multiplier);
+        return data[(v_start + v) * v_multiplier + (h_start + h) * h_multiplier];
     }
 
 
-    template<int N, typename std::enable_if<(V * H + H * N < 9), int>::type = 0>
+    template<int N, typename std::enable_if<(V * H + H * N < BIG_SIZE), int>::type = 0>
     Matrix<float, V, N> const operator*(const Matrix<float, H, N>& m2) {
         Matrix<float, V, N> ret;
         for (int i = 0; i < V; ++i) {
@@ -86,16 +79,12 @@ struct Matrix {
     }
     
 
-    template<int N, typename std::enable_if<(V * H + H * N >= 9), int>::type = 0>
+    template<int N, typename std::enable_if<(V * H + H * N >= BIG_SIZE), int>::type = 0>
     Matrix<float, V, N> const operator*(const Matrix<float, H, N>& m2) {
         constexpr int AV1 = V/2;
-        constexpr int AV2 = V - AV1;
         constexpr int AH1 = H/2;
-        constexpr int AH2 = H - AH1;
         constexpr int BV1 = H/2;
-        constexpr int BV2 = H - BV1;
         constexpr int BH1 = N/2;
-        constexpr int BH2 = N - BH1;
         auto A00 = view<0, 0, AV1, AH1>();
         auto A01 = view<0, AH1, AV1, H>();
         auto A10 = view<AV1, 0, V, AH1>();
@@ -105,8 +94,8 @@ struct Matrix {
         auto B10 = m2.template view<AV1, 0, V, AH1>();
         auto B11 = m2.template view<AV1, AH1, V, H>();
 
-        A11 += A01 - A10;
-        B11 += B01 - B10;
+        A11 = A11 + A01 - A10;
+        B11 = B11 + B01 - B10;
 
         auto t0 = A10 + A11;
         auto t1 = A11 - A01;
@@ -162,23 +151,23 @@ struct Matrix {
     }
 
     Matrix<T, H, V> transposed() {
-        return Matrix<T, H, V>(this, h_multiplier, v_multiplier, h_start, v_start);
+        return Matrix<T, H, V>(data, h_multiplier, v_multiplier, h_start, v_start);
     }
 
     template <int V0, int H0, int V1, int H1>
     Matrix<T, V1 - V0, H1 - H0> const view() const {
         // returns a matrix view starting from (v0, h0) inclusive to (v1, h1) exclusive
-        return Matrix<T, V1 - V0, H1 - H0>(this, v_multiplier, h_multiplier, v_start + V0, h_start + H0);
+        return Matrix<T, V1 - V0, H1 - H0>(data, v_multiplier, h_multiplier, v_start + V0, h_start + H0);
     }
     template <int V0, int H0, int V1, int H1>
     Matrix<T, V1 - V0, H1 - H0> view() {
         // returns a matrix view starting from (v0, h0) inclusive to (v1, h1) exclusive
-        return Matrix<T, V1 - V0, H1 - H0>(this, v_multiplier, h_multiplier, v_start + V0, h_start + H0);
+        return Matrix<T, V1 - V0, H1 - H0>(data, v_multiplier, h_multiplier, v_start + V0, h_start + H0);
     }
 
     RowVector<T, H*V> flattened() {
         if (h_start == 0)
-            return RowVector<T, H*V>(this, v_multiplier, h_multiplier, v_start, 0);
+            return RowVector<T, H*V>(data, v_multiplier, h_multiplier, v_start, 0);
         else
             throw "flattening a matrix view is inefficient";
     }
@@ -189,7 +178,7 @@ struct Matrix {
         os << "Matrix(" << V << ", " << H << ")[\n";
         for (int i = 0; i < V; ++i) {
             for (int j = 0; j < H; ++j) {
-                os << obj[i, j] << ", ";
+                os << obj[i, j] << ",\t";
             }
             os << std::endl;
         }
@@ -204,21 +193,22 @@ struct RowVector: public Matrix<T, 1, L> {
     using Matrix<T, 1, L>::h_multiplier;
     using Matrix<T, 1, L>::v_start;
     using Matrix<T, 1, L>::h_start;
+    using Matrix<T, 1, L>::data;
     
-    RowVector(Tensor<T, L>* data, int h_multiplier, int h_start): Matrix<T, 1, L>(data, 1, h_multiplier, 0, h_start) {}
+    RowVector(RowVector<T, L> const&) = default;
+    RowVector(DataSlice<T> data, int h_multiplier, int h_start): Matrix<T, 1, L>(data, 1, h_multiplier, 0, h_start) {}
     using Matrix<T, 1, L>::Matrix;
     using Matrix<T, 1, L>::operator*;
 
     T& operator[](int h) {
-        return Tensor<T, L>::operator[](v_start * v_multiplier + (h_start + h) * h_multiplier);
+        return Matrix<T, L, 1>::operator[](0, h);
     }
-
     T operator[](int h) const {
-        return Tensor<T, L>::operator[](v_start * v_multiplier + (h_start + h) * h_multiplier);
+        return Matrix<T, L, 1>::operator[](0, h);
     }
 
     ColVector<T, L> transposed() {
-        return ColVector(this, h_multiplier, v_multiplier, h_start, v_start);
+        return ColVector(data, h_multiplier, v_multiplier, h_start, v_start);
     }
 };
 
@@ -228,6 +218,7 @@ struct ColVector: public Matrix<T, L, 1> {
     using Matrix<T, L, 1>::h_multiplier;
     using Matrix<T, L, 1>::v_start;
     using Matrix<T, L, 1>::h_start;
+    using Matrix<T, L, 1>::data;
     
     template<int L1, int L2>
     ColVector(ColVector<T, L1> first, ColVector<T, L2> second): Matrix<T, L1 + L2, 1>() {
@@ -238,26 +229,26 @@ struct ColVector: public Matrix<T, L, 1> {
             operator[](L1 + i) = second[i];
         }
     }
-    ColVector(Tensor<T, L>* data, int v_multiplier, int v_start): Matrix<T, L, 1>(data, v_multiplier, 1, v_start, 0) {}
+    ColVector(ColVector<T, L> const&) = default;
+    ColVector(DataSlice<T> data, int v_multiplier, int v_start): Matrix<T, L, 1>(data, v_multiplier, 1, v_start, 0) {}
     using Matrix<T, L, 1>::Matrix;
     using Matrix<T, L, 1>::operator*;
 
     T& operator[](int v) {
-        return Tensor<T, L>::operator[]((v_start + v) * v_multiplier + h_start * h_multiplier);
+        return Matrix<T, L, 1>::operator[](v, 0);
     }
-
     T operator[](int v) const {
-        return Tensor<T, L>::operator[]((v_start + v) * v_multiplier + h_start * h_multiplier);
+        return Matrix<T, L, 1>::operator[](v, 0);
     }
 
 
     RowVector<T, L> transposed() {
-        return RowVector<T, L>(this, h_multiplier, v_multiplier, h_start, v_start);
+        return RowVector<T, L>(data, h_multiplier, v_multiplier, h_start, v_start);
     }
 
     template<int I, int J>
     ColVector<T, J - I> slice() {
-        return ColVector<T, J - I>(this, v_multiplier, h_multiplier, I * v_multiplier + v_start, h_start);
+        return ColVector<T, J - I>(data, v_multiplier, h_multiplier, I * v_multiplier + v_start, h_start);
     }
 };
 
@@ -268,7 +259,19 @@ Matrix<T, V, H> operator+(Matrix<T, V, H> const m1, Matrix<T, V, H> const m2) {
     Matrix<T, V, H> ret;
     for (int i = 0; i < V; ++i) {
         for (int j = 0; j < H; ++j) {
-            ret[i, j] = m1[i, 1] + m2[i, j];
+            ret[i, j] = m1[i, j] + m2[i, j];
+        }
+    }
+    return ret;
+}
+
+template<typename T, int V1, int V2, int H1, int H2>
+Matrix<T, std::max(V1, V2), std::max(H1, H2)> operator+(Matrix<T, V1, H1> const m1, Matrix<T, V2, H2> const m2) {
+    Matrix<T, std::max(V1, V2), std::max(H1, H2)> ret;
+    for (int i = 0; i < std::max(V1, V2); ++i) {
+        for (int j = 0; j < std::max(H1, H2); ++j) {
+            if (i < V1 && j < H1) ret[i, j] = m1[i, j];
+            if (i < V2 && j < H2) ret[i, j] += m2[i, j];
         }
     }
     return ret;
@@ -280,7 +283,19 @@ Matrix<T, V, H> operator-(Matrix<T, V, H> const m1, Matrix<T, V, H> const m2) {
     Matrix<T, V, H> ret;
     for (int i = 0; i < V; ++i) {
         for (int j = 0; j < H; ++j) {
-            ret[i, j] = m1[i, 1] - m2[i, j];
+            ret[i, j] = m1[i, j] - m2[i, j];
+        }
+    }
+    return ret;
+}
+
+template<typename T, int V1, int V2, int H1, int H2>
+Matrix<T, std::max(V1, V2), std::max(H1, H2)> operator-(Matrix<T, V1, H1> const m1, Matrix<T, V2, H2> const m2) {
+    Matrix<T, std::max(V1, V2), std::max(H1, H2)> ret;
+    for (int i = 0; i < std::max(V1, V2); ++i) {
+        for (int j = 0; j < std::max(H1, H2); ++j) {
+            if (i < V1 && j < H1) ret[i, j] = m1[i, j];
+            if (i < V2 && j < H2) ret[i, j] -= m2[i, j];
         }
     }
     return ret;

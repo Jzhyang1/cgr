@@ -72,9 +72,27 @@ public:
         OUT::template init_weights<IN_SZ>(weights);
         next_weights.init_weights();
     }
-    void save_weights() {
-        std::cout << "Layer weights (" << OUT::size << " x " << IN_SZ << "):\n" << weights << "\n\n"
-        next_weights.save_weights();
+
+    void save_weights(std::ostream& os) {
+        os << weights << "\n\n";
+        next_weights.save_weights(os);
+    }
+    void load_weights(std::istream& is) {
+        std::string discard_line;
+        std::getline(is, discard_line);
+        
+        char discard_char;
+        for (int i = 0; i < OUT::size; ++i) {
+            for (int j = 0; j < IN_SZ; ++j) {
+                is >> weights[i, j] >> discard_char;    //skip the character immediately after (may be space, comma, newline, etc)
+            }
+        }
+        std::getline(is, discard_line);
+        std::getline(is, discard_line);
+        std::getline(is, discard_line);
+        // three lines to discard (the current line, the end bracket, and the next line)
+
+        next_weights.load_weights(is);
     }
 };
 
@@ -101,14 +119,22 @@ public:
     void init_weights() override {
         OUT::template init_weights<IN_SZ>(weights);
     }
-    void save_weights() {
-        std::cout << "Layer weights (" << OUT::size << " x " << IN_SZ << "):\n";
+    
+    // Overload the stream insertion operator
+    void save_weights(std::ostream& os) {
+        os << weights << "\n\n";
+    }
+    void load_weights(std::istream& is) {
+        std::string discard_line;
+        std::getline(is, discard_line);
+        
+        char discard_char;
         for (int i = 0; i < OUT::size; ++i) {
             for (int j = 0; j < IN_SZ; ++j) {
-                std::cout << weights[i, j] << " ";
+                is >> weights[i, j] >> discard_char;    //skip the character immediately after (may be space, comma, newline, etc)
             }
-            std::cout << "\n";
         }
+        std::getline(is, discard_line);
     }
 };
 

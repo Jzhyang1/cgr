@@ -13,10 +13,11 @@
 using namespace std;
 
 int main() {
-    Matrix<float, 3, 3> m1;
-    //  1  3  2
-    //  2  1  1
-    //  4  5  1
+    Matrix<float, 4, 4> m1;
+    //  1  3  2  0
+    //  2  1  1  0
+    //  4  5  1  0
+    //  0  0  0  0
     m1[0, 0] = 1.0f;
     m1[0, 1] = 3.0f;
     m1[0, 2] = 2.0f;
