@@ -1,17 +1,48 @@
-main: 
-	g++ -std=gnu++23 -g train.cxx -o train.a
+# Variables
+CXX := g++-14
+NVCC := nvcc
+CUDA_PATH := /usr/local/cuda-12.9
+CXXFLAGS := -std=gnu++23 -fPIC -I$(CUDA_PATH)/include
+NVCCFLAGS := -ccbin /usr/bin/gcc-14 -std=c++17 -Xcompiler -fPIC
+LDFLAGS := -L$(CUDA_PATH)/lib64 -lcudart
+BUILD_DIR := build
+BIN_DIR := bin
 
-gpu:
-	nvcc -ccbin /usr/bin/gcc-14 -Wno-deprecated-gpu-targets -Xcompiler="-fpermissive" tensors_cuda.cu -c tensors_cuda.o
+# Source files
+TRAIN_SRC := train.cxx
+gpu_SRC := tensors_cuda.cu
+EVAL_SRC := eval.cxx
+TEST_SRC := test.cxx
+EXAMPLE_SRC := example.cxx
 
-eval: 
-	g++ -std=gnu++23 -g eval.cxx -o eval.a
-	./eval.a
+# Output files
+TRAIN_OBJ := $(BUILD_DIR)/train.o
+GPU_OBJ := $(BUILD_DIR)/tensors_cuda.o
+TRAIN_BIN := $(BIN_DIR)/train.a
+EVAL_BIN := $(BIN_DIR)/eval.a
+TEST_BIN := $(BIN_DIR)/test.a
+EXAMPLE_BIN := $(BIN_DIR)/example.a
 
-test: 
-	g++ -std=gnu++23 -g test.cxx -o test.a
-	./test.a
+.PHONY: all main clean
 
-example: 
-	g++ -std=gnu++23 -g example.cxx -o example.a
-	./example.a
+all: main
+
+main: train.a
+
+# Pattern rule for building .a binaries from .cxx files, always depending on GPU_OBJ
+%.a: %.cxx $(GPU_OBJ) | $(BIN_DIR)
+	$(CXX) $(CXXFLAGS) -g $< $(LDFLAGS) $(GPU_OBJ) -o $(BIN_DIR)/$@
+
+# GPU object file
+$(GPU_OBJ): $(gpu_SRC) | $(BUILD_DIR)
+	$(NVCC) $(NVCCFLAGS) -c $< -o $@
+
+# Train object file (not needed for pattern rule, but kept for main)
+$(TRAIN_OBJ): $(TRAIN_SRC) | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) -c $< -o $@
+
+$(BIN_DIR) $(BUILD_DIR):
+	mkdir -p $@
+
+clean:
+	rm -rf $(BUILD_DIR) $(BIN_DIR)

@@ -1,7 +1,9 @@
 #include <cuda_runtime.h>
 
-__global__ void matmul_kernel(
-    float* A, float* B, float* C,
-    int V, int H, int N,
-    int A_v_mult, int A_h_mult,
-    int B_v_mult, int B_h_mult);
+#ifdef __cplusplus
+extern "C"
+#endif
+
+void matmul_cuda(const float* A, size_t sizeA_bytes, int Avs, int Ahs, int Avm, int Ahm,
+                 const float* B, size_t sizeB_bytes, int Bvs, int Bhs, int Bvm, int Bhm,
+                 float* C, int V, int N, int H);

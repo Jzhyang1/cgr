@@ -3,10 +3,10 @@
 #include <memory>
 #include <cassert>
 #include <iostream>
+#include "tensors_cuda.h"
 
 
-constexpr int BIG_SIZE = 4096; 
-
+constexpr int BIG_SIZE = 16384; 
 
 
 
@@ -38,6 +38,9 @@ struct DataSlice {
     }
 };
 
+
+
+
 template<typename T, int V = 1, int H = 1>
 struct Matrix {
     DataSlice<T> data;
@@ -66,16 +69,14 @@ struct Matrix {
 
 
     template<int N, typename std::enable_if<(V * H + H * N < BIG_SIZE), int>::type = 0>
-    Matrix<float, V, N> const operator*(const Matrix<float, H, N>& m2) {
-        Matrix<float, V, N> ret;
-        for (int i = 0; i < V; ++i) {
-            for (int j = 0; j < N; ++j) {
-                for (int k = 0; k < H; ++k) {
-                    ret[i, j] += operator[](i, k) * m2[k, j];
-                }
-            }
-        }
-        return ret;
+    Matrix<float, V, N> const operator*(const Matrix<float, H, N>& B) {
+        Matrix<float, V, N> result;
+        matmul_cuda(
+              data.data_view.data(),   data.data_view.size(),   v_start,   h_start,   v_multiplier,   h_multiplier,
+            B.data.data_view.data(), B.data.data_view.size(), B.v_start, B.h_start, B.v_multiplier, B.h_multiplier,
+            result.data.data_view.data(), V, N, H
+        );
+        return result;
     }
     
 
@@ -310,6 +311,7 @@ ColVector<T, L> operator-(ColVector<T, L> const& m1, ColVector<T, L> const& m2) 
     }
     return ret;
 }
+
 
 
 template<typename T, int L>
