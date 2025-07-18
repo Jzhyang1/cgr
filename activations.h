@@ -52,8 +52,8 @@ struct Sigmoid : Activation<SZ> {
     template<int IN_SZ>
     static void init_weights(Matrix<float, SZ, IN_SZ>& weights) {
         float r = sqrtf(6.0/(IN_SZ + SZ)); // used for Glorot initialization
-        for (int i = 0; i < IN_SZ; ++i) {
-            for (int j = 0; j < SZ; ++j) {
+        for (int i = 0; i < SZ; ++i) {
+            for (int j = 0; j < IN_SZ; ++j) {
                 float temp = weights[i, j] = sample<UNIFORM>(-r, r);
             }
         }
@@ -82,8 +82,8 @@ struct Tanh : Activation<SZ> {
     template<int IN_SZ>
     static void init_weights(Matrix<float, SZ, IN_SZ>& weights) {
         float r = sqrtf(6.0/(IN_SZ + SZ)); // used for Glorot initialization
-        for (int i = 0; i < IN_SZ; ++i) {
-            for (int j = 0; j < SZ; ++j) {
+        for (int i = 0; i < SZ; ++i) {
+            for (int j = 0; j < IN_SZ; ++j) {
                 float temp = weights[i, j] = sample<UNIFORM>(-r, r);
             }
         }
@@ -113,8 +113,8 @@ struct ReLU : Activation<SZ> {
     template<int IN_SZ>
     static void init_weights(Matrix<float, SZ, IN_SZ>& weights) {
         float r = sqrtf(2.0/IN_SZ); // used for He initialization
-        for (int i = 0; i < IN_SZ; ++i) {
-            for (int j = 0; j < SZ; ++j) {
+        for (int i = 0; i < SZ; ++i) {
+            for (int j = 0; j < IN_SZ; ++j) {
                 float temp = weights[i, j] = sample<NORMAL>(-r, r);
             }
         }
