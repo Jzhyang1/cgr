@@ -3,11 +3,12 @@
 
 constexpr int alphsize = 32;
 constexpr int lookback = 32;
+constexpr int batchsize = 100;
 constexpr int epochs = 1;
 
 SequentialLayers<alphsize, lookback * alphsize, 
-    Tanh<256>, Tanh<64>, Tanh<32>, Sigmoid<32>
-> base_model(0.1f); // predicts the next letter
+    ReLU<256>, Tanh<128>, Tanh<64>, Softmax<32>
+> base_model(0.02f); // predicts the next letter
 
 
 std::map<char, int> alphabet;
@@ -18,8 +19,8 @@ void init_alphabet() {
     for (char c = 'a'; c <= 'z'; ++c) {
         alphabet[c] = alphabet.size();
     }
-    alphabet['-'] = alphabet.size();
     alphabet[' '] = alphabet.size();
+    alphabet['\xA0'] = alphabet.size();
     alphabet[','] = alphabet.size();
     alphabet[':'] = alphabet.size();
     alphabet['.'] = alphabet.size();

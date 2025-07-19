@@ -197,6 +197,7 @@ struct RowVector: public Matrix<T, 1, L> {
     using Matrix<T, 1, L>::data;
     
     RowVector(RowVector<T, L> const&) = default;
+    RowVector(Matrix<T, 1, L> const& mat) : Matrix<T, 1, L>(mat) {}
     RowVector(DataSlice<T> data, int h_multiplier, int h_start): Matrix<T, 1, L>(data, 1, h_multiplier, 0, h_start) {}
     using Matrix<T, 1, L>::Matrix;
     using Matrix<T, 1, L>::operator*;
@@ -231,6 +232,7 @@ struct ColVector: public Matrix<T, L, 1> {
         }
     }
     ColVector(ColVector<T, L> const&) = default;
+    ColVector(Matrix<T, L, 1> const& mat) : Matrix<T, L, 1>(mat) {}
     ColVector(DataSlice<T> data, int v_multiplier, int v_start): Matrix<T, L, 1>(data, v_multiplier, 1, v_start, 0) {}
     using Matrix<T, L, 1>::Matrix;
     using Matrix<T, L, 1>::operator*;

@@ -54,6 +54,20 @@ concept Activation_ =
 // |                                                                 |
 // |                                                                 |
 // -------------------------------------------------------------------
+// helper functions
+
+float safe_expf(float x) {
+    if (x > 30.0) return expf(30.0);
+    if (x < -30.0) return expf(-30.0);
+    return expf(x);
+}
+
+
+
+// -------------------------------------------------------------------
+// |                                                                 |
+// |                                                                 |
+// -------------------------------------------------------------------
 
 
 template<int SZ>
@@ -61,7 +75,7 @@ struct Sigmoid : Activation<SZ> {
     static ColVector<float, SZ> activate(ColVector<float, SZ> const& x) {
         ColVector<float, SZ> ret;
         for (int i = 0; i < SZ; ++i) {
-            ret[i] = 1 / (1 + expf(-x[i]));
+            ret[i] = 1 / (1 + safe_expf(-x[i]));
         }
         return ret;
     }
@@ -69,7 +83,7 @@ struct Sigmoid : Activation<SZ> {
     static ColVector<float, SZ> derivative(ColVector<float, SZ> const& x) {
         ColVector<float, SZ> ret;
         for (int i = 0; i < SZ; ++i) {
-            float s = 1 / (1 + expf(-x[i]));
+            float s = 1 / (1 + safe_expf(-x[i]));
             ret[i] = s * (1 - s);
         }
         return ret;
@@ -142,7 +156,7 @@ struct Softmax : Activation<SZ> {
         float sum = 0.0f;
         ColVector<float, SZ> ret;
         for (int i = 0; i < SZ; ++i) {
-            ret[i] = std::exp(x[i] - max_val);
+            ret[i] = safe_expf(x[i] - max_val);
             sum += ret[i];
         }
         for (int i = 0; i < SZ; ++i) {
@@ -152,12 +166,8 @@ struct Softmax : Activation<SZ> {
     }
 
     static ColVector<float, SZ> derivative(ColVector<float, SZ> const& x) {
-        ColVector<float, SZ> ret;
-        ColVector<float, SZ> y = activate(x);
-        for (int i = 0; i < SZ; ++i) {
-            ret[i] = y[i] * (1 - y[i]);
-        }
-        return ret;
+        // assuming we're using cross-entropy loss immediately after
+        return x;
     }
 
     template<int IN_SZ>

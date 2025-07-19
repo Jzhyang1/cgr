@@ -9,6 +9,7 @@
 #include <fstream>  // Required for file stream operations (e.g., ifstream)
 
 
+
 using namespace std;
 
 // supported characters are:
@@ -21,10 +22,10 @@ int main() {
 
     //begin training
     auto start = std::chrono::high_resolution_clock::now();
-    // std::ifstream initial_weights("weights.txt");
-    // base_model.load_weights(initial_weights);
-    // initial_weights.close();
-    base_model.init_weights();
+    std::ifstream initial_weights("weights.txt");
+    base_model.load_weights(initial_weights);
+    initial_weights.close();
+    // base_model.init_weights();
 
     //our training corpus
     vector<float> one_hot_vec;
@@ -33,9 +34,12 @@ int main() {
     {
         std::ifstream inputFile("train_data/crimeandpunishment.txt");
         char c, cp = ' ', cpp = ' ';
+        
         while (inputFile.get(c)) {
             c = tolower(c);
-            if (!alphabet.contains(c)) continue;
+            if (!alphabet.contains(c)) {
+                continue;
+            }
             queue.push_back(c);
 
             // update probabilities
@@ -54,11 +58,12 @@ int main() {
         inputFile.close();
     }
 
-    n = 50000; // we don't want to see too much text at once
+    n = 500000; // we don't want to see too much text at once
     int first_index = 100; //first_index at minimum is equal to lookback
     vector<float>::iterator one_hot_begin = one_hot_vec.begin() + first_index * alphsize;
 
     for (int _ = 0; _ < epochs; ++_) {
+        ColVector<float, alphsize> error_sum;
         for (int k = 0; k < n; ++k) {
             span<float> one_hot_it{one_hot_begin + (k - lookback) * alphsize, one_hot_begin + k * alphsize};
             span<float> one_hot_ot{one_hot_begin + k * alphsize, one_hot_begin + (k + 1) * alphsize};
@@ -66,31 +71,21 @@ int main() {
             one_hot_it[0] = 1;  // trick for biases
             ColVector<float, lookback * alphsize> input{DataSlice<float>(one_hot_it)};
             ColVector<float, alphsize> correct{DataSlice<float>(one_hot_ot)};
-            
-            // define correct weights
-            // correct[alphabet[queue[k]]] = 0.8f; // force model to predict the next letter rather than most common letter
-            //also give everything else reasonable a reasonable score
-            map<char, int>& dist = probabilities[{queue[first_index + k - 2], queue[first_index + k - 1]}];
-            int count = dist['\0'];
-            for (auto e : dist) {
-                if (e.first == '\0') continue;
-                correct[alphabet[e.first]] += sqrt(e.second / (float) count);
-            }
 
-            // do it a few extra times (overfit) to see what happens
-            float loss = 1;
-            int t = 0;
-            float temp = base_model.learning_rate;
-            while ((loss > 1 && t < 1000) || (loss > 0.5 && t < 20)) {
-                ColVector<float, alphsize> pred = base_model.fwd(input);
-                ColVector<float, alphsize> error = pred - correct;
-                loss = error * error;
-                base_model.bwd(error);
-                cout << k << " loss: " << loss << endl;
-                base_model.learning_rate = temp * (1 + t/40.0);
-                ++t;
+            ColVector<float, alphsize> pred = base_model.fwd(input);
+            ColVector<float, alphsize> error = pred - correct; // cross entropy
+            error_sum += error;
+
+            // logging
+            float loss = -logf(pred * correct);
+            cout << k << " loss: " << loss << endl;
+
+            // gradient accumulation
+            if ((k + 1) % batchsize == 0) {
+                constexpr float frac = 1 / batchsize;
+                base_model.bwd(fmatmul(frac, error_sum));
+                error_sum -= error_sum;
             }
-            base_model.learning_rate = temp;
         }
     }
 
