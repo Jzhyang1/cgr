@@ -25,7 +25,6 @@ int main() {
     std::ifstream initial_weights("weights.txt");
     base_model.load_weights(initial_weights);
     initial_weights.close();
-    // base_model.init_weights();
 
     //our training corpus
     vector<float> one_hot_vec;
@@ -58,7 +57,7 @@ int main() {
         inputFile.close();
     }
 
-    n = 500000; // we don't want to see too much text at once
+    n = 1000; // we don't want to see too much text at once
     int first_index = 100; //first_index at minimum is equal to lookback
     vector<float>::iterator one_hot_begin = one_hot_vec.begin() + first_index * alphsize;
 
@@ -77,7 +76,7 @@ int main() {
             error_sum += error;
 
             // logging
-            float loss = -logf(pred * correct);
+            float loss = -logf(dot(pred, correct));
             cout << k << " loss: " << loss << endl;
 
             // gradient accumulation

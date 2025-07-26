@@ -3,12 +3,12 @@
 
 constexpr int alphsize = 32;
 constexpr int lookback = 32;
-constexpr int batchsize = 100;
+constexpr int batchsize = 10;
 constexpr int epochs = 1;
 
 SequentialLayers<alphsize, lookback * alphsize, 
-    ReLU<256>, Tanh<128>, Tanh<64>, Softmax<32>
-> base_model(0.02f); // predicts the next letter
+    ReLU<256>, Tanh<128>, Quadratic<64>, Softmax<32>
+> base_model(0.005f); // predicts the next letter
 
 
 std::map<char, int> alphabet;

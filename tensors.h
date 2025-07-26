@@ -3,6 +3,8 @@
 #include <memory>
 #include <cassert>
 #include <iostream>
+#include <functional>
+#include <regex>
 #include "tensors_cuda.h"
 
 
@@ -67,9 +69,8 @@ struct Matrix {
         return data[(v_start + v) * v_multiplier + (h_start + h) * h_multiplier];
     }
 
-
     template<int N, typename std::enable_if<(V * H + H * N < BIG_SIZE), int>::type = 0>
-    Matrix<float, V, N> const operator*(const Matrix<float, H, N>& B) {
+    Matrix<float, V, N> operator*(const Matrix<float, H, N>& B) {
         Matrix<float, V, N> result;
         matmul_cuda(
               data.data_view.data(),   data.data_view.size(),   v_start,   h_start,   v_multiplier,   h_multiplier,
@@ -79,9 +80,8 @@ struct Matrix {
         return result;
     }
     
-
     template<int N, typename std::enable_if<(V * H + H * N >= BIG_SIZE), int>::type = 0>
-    Matrix<float, V, N> const operator*(const Matrix<float, H, N>& m2) {
+    Matrix<float, V, N> operator*(const Matrix<float, H, N>& m2) {
         constexpr int AV1 = V/2;
         constexpr int AH1 = H/2;
         constexpr int BV1 = H/2;
@@ -123,7 +123,7 @@ struct Matrix {
         return ret;
     }
 
-    ColVector<float, V> const operator*(const ColVector<float, H> m2) {
+    ColVector<float, V> operator*(const ColVector<float, H> m2) {
         ColVector<float, V> ret;
         for (int i = 0; i < V; ++i) {
             for (int j = 0; j < H; ++j) {
@@ -155,6 +155,17 @@ struct Matrix {
         return Matrix<T, H, V>(data, h_multiplier, v_multiplier, h_start, v_start);
     }
 
+    template<typename U>
+    Matrix<U, V, H> applied(std::function<U(T)> func) {
+        Matrix<U, V, H> ret;
+        for (int i = 0; i < V; ++i) {
+            for (int j = 0; j < H; ++j) {
+                ret[i, j] = func(operator[](i, j));
+            }
+        }
+        return ret;
+    }
+
     template <int V0, int H0, int V1, int H1>
     Matrix<T, V1 - V0, H1 - H0> const view() const {
         // returns a matrix view starting from (v0, h0) inclusive to (v1, h1) exclusive
@@ -183,8 +194,39 @@ struct Matrix {
             }
             os << std::endl;
         }
-        os << ']';
+        os << "]";
         return os;
+    }
+    // Overload the stream read operator
+    friend std::istream& operator>>(std::istream& is, Matrix& obj) {
+        // read the first line
+        std::string line;
+        std::getline(is, line);
+
+        std::regex first_line_pattern(R"(Matrix\((\d+),\s*(\d+)\)\[)");
+        std::smatch match;
+        if (std::regex_search(line, match, first_line_pattern)) {
+            int _V = std::stoi(match[1]);
+            int _H = std::stoi(match[2]);
+            
+            if (_V != V || _H != H) {
+                std::cerr << "trying to read Matrix of " << _V << 'x' << _H << " into " << V << 'x' << H;
+                throw "Matrix read from stream failed";
+            }
+        } else {
+            std::cerr << "trying to read Matrix header but encountered " << line;
+            throw "Matrix read from stream failed";
+        }
+        for (int i = 0; i < V; ++i) {
+            for (int j = 0; j < H; ++j) {
+                char comma;
+                is >> obj[i, j] >> comma;
+            }
+            std::getline(is, line); // clear the remainder of the line
+        }
+        char endbrace;
+        is >> endbrace;
+        return is;
     }
 };
 
@@ -200,18 +242,45 @@ struct RowVector: public Matrix<T, 1, L> {
     RowVector(Matrix<T, 1, L> const& mat) : Matrix<T, 1, L>(mat) {}
     RowVector(DataSlice<T> data, int h_multiplier, int h_start): Matrix<T, 1, L>(data, 1, h_multiplier, 0, h_start) {}
     using Matrix<T, 1, L>::Matrix;
-    using Matrix<T, 1, L>::operator*;
 
     T& operator[](int h) {
-        return Matrix<T, L, 1>::operator[](0, h);
+        return Matrix<T, 1, L>::operator[](0, h);
     }
     T operator[](int h) const {
-        return Matrix<T, L, 1>::operator[](0, h);
+        return Matrix<T, 1, L>::operator[](0, h);
     }
 
     ColVector<T, L> transposed() {
         return ColVector(data, h_multiplier, v_multiplier, h_start, v_start);
     }
+
+    T operator*(ColVector<T, L> const& m2) const {
+        T ret;
+        for (int i = 0; i < L; ++i) {
+            ret += operator[](i) * m2[i];
+        }
+        return ret;
+    }
+    template<int H>
+    RowVector<T, H> operator*(Matrix<T, L, H> const& m2) const {
+        RowVector<T, H> result;
+        for (int h = 0; h < H; ++h) {
+            for (int l = 0; l < L; ++l) {
+                result[h] += operator[](l) * m2[l, h];
+            }
+        }
+        return result;
+    }
+
+    // // Overload the stream insertion operator
+    // friend std::ostream& operator<<(std::ostream& os, const RowVector& obj) {
+    //     os << "RowVector(" << L << ")[\n";
+    //     for (int i = 0; i < L; ++i) {
+    //         os << obj[i] << ",\t";
+    //     }
+    //     os << "\n]";
+    //     return os;
+    // }
 };
 
 template<typename T, int L>
@@ -253,6 +322,17 @@ struct ColVector: public Matrix<T, L, 1> {
     ColVector<T, J - I> slice() {
         return ColVector<T, J - I>(data, v_multiplier, h_multiplier, I * v_multiplier + v_start, h_start);
     }
+
+    // // Overload the stream insertion operator
+    // friend std::ostream& operator<<(std::ostream& os, const ColVector& obj) {
+    //     os << "ColVector(" << L << ")[\n";
+    //     for (int i = 0; i < L; ++i) {
+    //         os << obj[i] << ",\t";
+    //         os << std::endl;
+    //     }
+    //     os << ']';
+    //     return os;
+    // }
 };
 
 
@@ -317,7 +397,7 @@ ColVector<T, L> operator-(ColVector<T, L> const& m1, ColVector<T, L> const& m2) 
 
 
 template<typename T, int L>
-T operator*(ColVector<T, L> const& m1, ColVector<T, L> const& m2) {
+T dot(ColVector<T, L> const& m1, ColVector<T, L> const& m2) {
     T ret;
     for (int i = 0; i < L; ++i) {
         ret += m1[i] * m2[i];

@@ -10,19 +10,18 @@
 using namespace std;
 
 SequentialLayers<1, 2, 
-    Tanh<2>, Tanh<4>, Tanh<4>, Sigmoid<1>
-> easy_model(0.001f); // predicts if a number is greater than 50
+    ReLU<2>, Tanh<4>, Tanh<4>, Tanh<1>
+> easy_model(0.05f); // predicts if a number is greater than 50
 
 int main() {
     auto start = std::chrono::high_resolution_clock::now();
-    easy_model.init_weights();
 
-    for (int j = 0; j < 10000; ++j) {
+    for (int j = 0; j < 50000; ++j) {
         int i = rand() % 100;  // small range for learning
         float x = (float)i / 100.0f;  // normalized
         bool is_lesser = i < 50;
 
-        ColVector<float, 2> input({x, 0});
+        ColVector<float, 2> input({x, 1});
         ColVector<float, 1> pred = easy_model.fwd(input);
 
         float error = pred[0] - is_lesser;

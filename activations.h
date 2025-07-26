@@ -4,6 +4,17 @@
 #include "tensors.h"
 #include "random.h"
 
+template<int SZ, int IN_SZ> 
+struct ActivateLayer {
+    static constexpr int size = SZ;
+    static constexpr int int_size = IN_SZ;
+
+    virtual ColVector<float, SZ> fwd(ColVector<float, IN_SZ> input) = 0;
+    virtual ColVector<float, IN_SZ> bwd(ColVector<float, SZ> loss, float learning_rate) = 0;
+    virtual void save_weights(std::ostream& os) = 0;
+    virtual void load_weights(std::istream& is) = 0;
+};
+
 template<int SZ>
 struct Activation {
     static constexpr int size = SZ;
@@ -29,24 +40,13 @@ struct Activation {
     }
 };
 
-// Base case: does not exist
-template<typename, typename = void>
-struct has_init_weights : std::false_type {};
-
-// Specialization: exists if calling it with some int works
-template<typename T>
-struct has_init_weights<T, std::void_t<
-    decltype(std::declval<T>().template init_weights<1>(std::declval<Matrix<float, T::size, 1>&>()))
->> : std::true_type {};
-
 
 template<typename A>
 concept Activation_ = 
     std::is_base_of_v<Activation<A::size>, A> &&
-    has_init_weights<A>::value &&
-    requires(ColVector<float, A::size> const& x) {
-        { A::activate(x) } -> std::same_as<ColVector<float, A::size>>;
-        { A::derivative(x) } -> std::same_as<ColVector<float, A::size>>;
+    requires {
+        typename A::template storage<1>;
+        requires std::is_base_of_v<ActivateLayer<A::size, 1>, typename A::template storage<1>>;
     };
 
 
@@ -72,77 +72,113 @@ float safe_expf(float x) {
 
 template<int SZ>
 struct Sigmoid : Activation<SZ> {
-    static ColVector<float, SZ> activate(ColVector<float, SZ> const& x) {
-        ColVector<float, SZ> ret;
-        for (int i = 0; i < SZ; ++i) {
-            ret[i] = 1 / (1 + safe_expf(-x[i]));
-        }
-        return ret;
-    }
-
-    static ColVector<float, SZ> derivative(ColVector<float, SZ> const& x) {
-        ColVector<float, SZ> ret;
-        for (int i = 0; i < SZ; ++i) {
-            float s = 1 / (1 + safe_expf(-x[i]));
-            ret[i] = s * (1 - s);
-        }
-        return ret;
-    }
-
     template<int IN_SZ>
-    static void init_weights(Matrix<float, SZ, IN_SZ>& weights) {
-        return Activation<SZ>::template init_weights_glorot<IN_SZ>(weights);
-    }
+    struct storage : ActivateLayer<SZ, IN_SZ> {
+        Matrix<float, SZ, IN_SZ> weights;
+        ColVector<float, IN_SZ> prev_input;
+        ColVector<float, SZ> prev_output;
+        storage() {
+            Activation<SZ>::template init_weights_glorot<IN_SZ>(weights);
+        }
+
+        ColVector<float, SZ> activate(ColVector<float, SZ> input_evaluated) {
+            return input_evaluated.template applied<float>([](float f){return 1 / (1 + safe_expf(-f));});
+        }
+        ColVector<float, SZ> derivative() {
+            return prev_output.template applied<float>([](float f){return f * (1 - f);});
+        }
+
+        ColVector<float, SZ> fwd(ColVector<float, IN_SZ> input) override {
+            prev_input = input;
+            prev_output = activate(weights * input);
+            return prev_output;
+        }
+        ColVector<float, IN_SZ> bwd(ColVector<float, SZ> loss, float learning_rate) override {
+            auto intermediate = dot_had(loss, derivative());
+            weights -= fmatmul(learning_rate, intermediate * prev_input.transposed());
+            return weights.transposed() * intermediate;
+        }
+
+        void save_weights(std::ostream& os) override {
+            os << weights;
+        }
+        void load_weights(std::istream& is) override {
+            is >> weights;
+        }
+    };
 };
 
 template<int SZ>
 struct Tanh : Activation<SZ> {
-    static ColVector<float, SZ> activate(ColVector<float, SZ> const& x) {
-        ColVector<float, SZ> ret;
-        for (int i = 0; i < SZ; ++i) {
-            ret[i] = tanh(x[i]);
-        }
-        return ret;
-    }
-
-    static ColVector<float, SZ> derivative(ColVector<float, SZ> const& x) {
-        ColVector<float, SZ> ret;
-        for (int i = 0; i < SZ; ++i) {
-            float temp = tanh(x[i]);
-            ret[i] = 1 - temp * temp;
-        }
-        return ret;
-    }
-
     template<int IN_SZ>
-    static void init_weights(Matrix<float, SZ, IN_SZ>& weights) {
-        return Activation<SZ>::template init_weights_glorot<IN_SZ>(weights);
-    }
+    struct storage : ActivateLayer<SZ, IN_SZ> {
+        Matrix<float, SZ, IN_SZ> weights;
+        ColVector<float, IN_SZ> prev_input;
+        ColVector<float, SZ> prev_output;
+        storage() {
+            Activation<SZ>::template init_weights_glorot<IN_SZ>(weights);
+        }
+        ColVector<float, SZ> activate(ColVector<float, SZ> input_evaluated) {
+            return input_evaluated.template applied<float>([](float f){return tanh(f);});
+        }
+        ColVector<float, SZ> derivative() {
+            return prev_output.template applied<float>([](float f){return 1 - f * f;});
+        }
+        ColVector<float, SZ> fwd(ColVector<float, IN_SZ> input) override {
+            prev_input = input;
+            prev_output = activate(weights * input);
+            return prev_output;
+        }
+        ColVector<float, IN_SZ> bwd(ColVector<float, SZ> loss, float learning_rate) override {
+            auto intermediate = dot_had(loss, derivative());
+            weights -= fmatmul(learning_rate, intermediate * prev_input.transposed());
+            return weights.transposed() * intermediate;
+        }
+
+        void save_weights(std::ostream& os) override {
+            os << weights;
+        }
+        void load_weights(std::istream& is) override {
+            is >> weights;
+        }
+    };
 };
 
 
 template<int SZ>
 struct ReLU : Activation<SZ> {
-    static ColVector<float, SZ> activate(ColVector<float, SZ> const& x) {
-        ColVector<float, SZ> ret;
-        for (int i = 0; i < SZ; ++i) {
-            ret[i] = x[i] > 0 ? x[i] : 0.0f;
-        }
-        return ret;
-    }
-
-    static ColVector<float, SZ> derivative(ColVector<float, SZ> const& x) {
-        ColVector<float, SZ> ret;
-        for (int i = 0; i < SZ; ++i) {
-            ret[i] = x[i] > 0 ? 1.0f : 0.0f;
-        }
-        return ret;
-    }
-
     template<int IN_SZ>
-    static void init_weights(Matrix<float, SZ, IN_SZ>& weights) {
-        return Activation<SZ>::template init_weights_he<IN_SZ>(weights);
-    }
+    struct storage : ActivateLayer<SZ, IN_SZ> {
+        Matrix<float, SZ, IN_SZ> weights;
+        ColVector<float, IN_SZ> prev_input;
+        ColVector<float, SZ> input_evaluated;
+        storage() {
+            Activation<SZ>::template init_weights_he<IN_SZ>(weights);
+        }
+        ColVector<float, SZ> activate() {
+            return input_evaluated.template applied<float>([](float f){return f > 0 ? f : 0;});
+        }
+        ColVector<float, SZ> derivative() {
+            return input_evaluated.template applied<float>([](float f){return f > 0 ? 1 : 0;});
+        }
+        ColVector<float, SZ> fwd(ColVector<float, IN_SZ> input) override {
+            prev_input = input;
+            input_evaluated = weights * input;
+            return activate();
+        }
+        ColVector<float, IN_SZ> bwd(ColVector<float, SZ> loss, float learning_rate) override {
+            auto intermediate = dot_had(loss, derivative());
+            weights -= fmatmul(learning_rate, intermediate * prev_input.transposed());
+            return weights.transposed() * intermediate;
+        }
+
+        void save_weights(std::ostream& os) override {
+            os << weights;
+        }
+        void load_weights(std::istream& is) override {
+            is >> weights;
+        }
+    };
 };
 
 
@@ -171,7 +207,70 @@ struct Softmax : Activation<SZ> {
     }
 
     template<int IN_SZ>
-    static void init_weights(Matrix<float, SZ, IN_SZ>& weights) {
-        return Activation<SZ>::template init_weights_glorot<IN_SZ>(weights);
-    }
+    struct storage : ActivateLayer<SZ, IN_SZ> {
+        Matrix<float, SZ, IN_SZ> weights;
+        ColVector<float, IN_SZ> prev_input;
+        ColVector<float, SZ> input_evaluated;
+        storage() {
+            Activation<SZ>::template init_weights_glorot<IN_SZ>(weights);
+        }
+        ColVector<float, SZ> fwd(ColVector<float, IN_SZ> input) override {
+            prev_input = input;
+            input_evaluated = weights * input;
+            return activate(input_evaluated);
+        }
+        ColVector<float, IN_SZ> bwd(ColVector<float, SZ> loss, float learning_rate) override {
+            auto intermediate = dot_had(loss, derivative(input_evaluated));
+            weights -= fmatmul(learning_rate, intermediate * prev_input.transposed());
+            return weights.transposed() * intermediate;
+        }
+
+        void save_weights(std::ostream& os) override {
+            os << weights;
+        }
+        void load_weights(std::istream& is) override {
+            is >> weights;
+        }
+    };
+};
+
+
+template<int SZ>
+struct Quadratic : Activation<SZ> {
+    template<int IN_SZ>
+    struct storage : ActivateLayer<SZ, IN_SZ> {
+        ColVector<Matrix<float, IN_SZ, IN_SZ>, SZ> weights;
+        ColVector<float, IN_SZ> prev_input;
+        ColVector<float, SZ> input_evaluated;
+        storage() {
+            for (int i = 0; i < SZ; ++i) {
+                Activation<IN_SZ>::template init_weights_glorot<IN_SZ>(weights[i]);
+            }
+        }
+        ColVector<float, SZ> fwd(ColVector<float, IN_SZ> input) override {
+            RowVector<float, IN_SZ> transposed = input.transposed();
+            prev_input = input;
+            return weights.template applied<float>([transposed, input](Matrix<float, IN_SZ, IN_SZ> mat)->float{return 0.5 * (transposed * mat * input);});
+        }
+        ColVector<float, IN_SZ> bwd(ColVector<float, SZ> loss, float learning_rate) override {
+            // loss: dL/dy (delta), size SZ
+            ColVector<float, IN_SZ> grad_input;
+
+            // dL/dW update and dL/dx computation
+            for (int i = 0; i < SZ; ++i) {
+                // Weight update
+                weights[i] -= fmatmul(learning_rate * loss[i], (prev_input * prev_input.transposed()));
+                // Input gradient
+                grad_input += fmatmul(loss[i], (weights[i] + weights[i].transposed()) * prev_input);
+            }
+            return grad_input;
+        }
+
+        void save_weights(std::ostream& os) override {
+            os << weights;
+        }
+        void load_weights(std::istream& is) override {
+            is >> weights;
+        }
+    };
 };

@@ -11,7 +11,6 @@ struct Model {
 
     virtual ColVector<float, OUT_SZ> fwd(ColVector<float, IN_SZ> input) = 0;
     virtual ColVector<float, IN_SZ> bwd(ColVector<float, OUT_SZ> loss) = 0;
-    virtual void init_weights() = 0;
 };
 
 template<typename A>
@@ -33,10 +32,6 @@ struct ReplacableModel : public Model<FINAL_SZ, IN_SZ> {
     ColVector<float, IN_SZ> bwd(ColVector<float, FINAL_SZ> loss) {
         return (*assigned_model).bwd(loss);
     }
-    void init_weights() {
-        if (assigned_model != nullptr)
-            (*assigned_model).init_weights();
-    }
 };
 
 
@@ -50,48 +45,26 @@ struct SequentialLayers<FINAL_SZ, IN_SZ, OUT>;
 
 template<int FINAL_SZ, int IN_SZ, Activation_ OUT, Activation_ ...NEURONS>
 struct SequentialLayers : public Model<FINAL_SZ, IN_SZ> {
-    Matrix<float, OUT::size, IN_SZ> weights;
-    ColVector<float, IN_SZ> prev_input;
-    ColVector<float, OUT::size> input_evaluated;
+    OUT::template storage<IN_SZ> weights;
     SequentialLayers<FINAL_SZ, OUT::size, NEURONS...> next_weights;
     float learning_rate;
 public:
     SequentialLayers(float learning_rate): learning_rate(learning_rate), next_weights(learning_rate) {}
 
     ColVector<float, FINAL_SZ> fwd(ColVector<float, IN_SZ> input) override {
-        prev_input = input;
-        input_evaluated = weights * input;
-        return next_weights.fwd(OUT::activate(input_evaluated));
+        return next_weights.fwd(weights.fwd(input));
     }
     ColVector<float, IN_SZ> bwd(ColVector<float, FINAL_SZ> loss) override {
-        ColVector<float, OUT::size> intermediate = dot_had(next_weights.bwd(loss), OUT::derivative(input_evaluated));
-        weights -= fmatmul(learning_rate, intermediate * prev_input.transposed());
-        return weights.transposed() * intermediate;
-    }
-    void init_weights() override {
-        OUT::template init_weights<IN_SZ>(weights);
-        next_weights.init_weights();
+        ColVector<float, OUT::size> intermediate = next_weights.bwd(loss);
+        return weights.bwd(intermediate, learning_rate);
     }
 
     void save_weights(std::ostream& os) {
-        os << weights << "\n\n";
+        weights.save_weights(os);
         next_weights.save_weights(os);
     }
     void load_weights(std::istream& is) {
-        std::string discard_line;
-        std::getline(is, discard_line);
-        
-        char discard_char;
-        for (int i = 0; i < OUT::size; ++i) {
-            for (int j = 0; j < IN_SZ; ++j) {
-                is >> weights[i, j] >> discard_char;    //skip the character immediately after (may be space, comma, newline, etc)
-            }
-        }
-        std::getline(is, discard_line);
-        std::getline(is, discard_line);
-        std::getline(is, discard_line);
-        // three lines to discard (the current line, the end bracket, and the next line)
-
+        weights.load_weights(is);
         next_weights.load_weights(is);
     }
 };
@@ -99,42 +72,24 @@ public:
 // base case
 template<int FINAL_SZ, int IN_SZ, Activation_ OUT> requires (FINAL_SZ == OUT::size)
 struct SequentialLayers<FINAL_SZ, IN_SZ, OUT> : public Model<FINAL_SZ, IN_SZ> {
-    Matrix<float, OUT::size, IN_SZ> weights;
-    ColVector<float, IN_SZ> prev_input;
-    ColVector<float, OUT::size> input_evaluated;
+    OUT::template storage<IN_SZ> weights;
     float learning_rate;
 public:
     SequentialLayers(float learning_rate): learning_rate(learning_rate) {}
 
     ColVector<float, FINAL_SZ> fwd(ColVector<float, IN_SZ> input) override {
-        prev_input = input;
-        input_evaluated = weights * input;
-        return OUT::activate(input_evaluated);
+        return weights.fwd(input);
     }
     ColVector<float, IN_SZ> bwd(ColVector<float, FINAL_SZ> loss) override {
-        auto intermediate = dot_had(loss, OUT::derivative(input_evaluated));
-        weights -= fmatmul(learning_rate, intermediate * prev_input.transposed());
-        return weights.transposed() * intermediate;
-    }
-    void init_weights() override {
-        OUT::template init_weights<IN_SZ>(weights);
+        return weights.bwd(loss, learning_rate);
     }
     
     // Overload the stream insertion operator
     void save_weights(std::ostream& os) {
-        os << weights << "\n\n";
+        weights.save_weights(os);
     }
     void load_weights(std::istream& is) {
-        std::string discard_line;
-        std::getline(is, discard_line);
-        
-        char discard_char;
-        for (int i = 0; i < OUT::size; ++i) {
-            for (int j = 0; j < IN_SZ; ++j) {
-                is >> weights[i, j] >> discard_char;    //skip the character immediately after (may be space, comma, newline, etc)
-            }
-        }
-        std::getline(is, discard_line);
+        weights.load_weights(is);
     }
 };
 
@@ -162,10 +117,6 @@ struct SequentialModels : public Model<FINAL_SZ, IN_SZ> {
     ColVector<float, IN_SZ> bwd(ColVector<float, FINAL_SZ> loss) override {
         return model.bwd(next_models.bwd(loss));
     }
-    void init_weights() override {
-        model.init_weights();
-        next_models.init_weights();
-    }
 };
 
 // base case
@@ -181,9 +132,6 @@ struct SequentialModels<FINAL_SZ, IN_SZ, FIRST> : public Model<FINAL_SZ, IN_SZ> 
     }
     ColVector<float, IN_SZ> bwd(ColVector<float, FINAL_SZ> loss) override {
         return model.bwd(loss);
-    }
-    void init_weights() override {
-        model.init_weights();
     }
 };
 
@@ -212,15 +160,13 @@ struct StackedModels : public Model<FINAL_SZ, IN_SZ> {
 
     ColVector<float, FINAL_SZ> fwd(ColVector<float, IN_SZ> input) override {
         ColVector<float, FIRST::out_size> top = model.fwd(input.template slice<0, FIRST::in_size>());
-        ColVector<float, FINAL_SZ - FIRST::out_size> bot = next_models.fwd(input.template slice<0, IN_SZ - FIRST::in_size>());
+        ColVector<float, FINAL_SZ - FIRST::out_size> bot = next_models.fwd(input.template slice<FIRST::in_size, IN_SZ>());
         return ColVector<float, FINAL_SZ>(top, bot);
     }
     ColVector<float, IN_SZ> bwd(ColVector<float, FINAL_SZ> loss) override {
-        return model.bwd(next_models.bwd(loss));
-    }
-    void init_weights() override {
-        model.init_weights();
-        next_models.init_weights();
+        ColVector<float, FIRST::in_size> top = model.bwd(loss.template slice<0, FIRST::out_size>());
+        ColVector<float, IN_SZ - FIRST::in_size> bot = next_models.bwd(loss.template slice<FIRST::out_size, FINAL_SZ>());
+        return ColVector<float, IN_SZ>(top, bot);
     }
 };
 
@@ -237,9 +183,6 @@ struct StackedModels<FINAL_SZ, IN_SZ, FIRST> : public Model<FINAL_SZ, IN_SZ> {
     }
     ColVector<float, IN_SZ> bwd(ColVector<float, FINAL_SZ> loss) override {
         return model.bwd(loss);
-    }
-    void init_weights() override {
-        model.init_weights();
     }
 };
 
